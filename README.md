@@ -26,12 +26,12 @@
 ```
 The range of runs can be set in this configration file by the "run_range" for each period. No filtering on the runs if the "run_range" is null.
 - Example file: config_rct.json.  
-- `python3 rct.py config_rct.json`
+- `python3 rct.py config_rct.json`. Add `--convert-time` if you want to save the timestamps in human-readable format. 
 - Separate .csv files are saved for each period if you have more than one period in the configuration file
 ## Produce run lists from RCT
 - Produce the .csv files mentioned in **Export runs from RCT (in Bookkeeping)** 
 - Example configuration file: rct_runlist.json. Modify it according to your needs
-- `python3 rct_runlist.py rct_runlist.json -d csv_file_path`. The `-d` can be omitted if the .csv files are already in the current directory. Add `--convert-time` if you want to save the timestamps in human-readable format. 
+- `python3 rct_runlist.py rct_runlist.json -d csv_file_path`. The `-d` can be omitted if the .csv files are already in the current directory. 
 ## Calculate and upload mu/INEL rate to RCT
 The scritps needed and the example configuration files can be found under `INEL_Mu`. 
 - `python3 inel_mu_calculation.py mu_inel.json` 
