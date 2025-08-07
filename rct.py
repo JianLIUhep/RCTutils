@@ -94,19 +94,46 @@ def fetch_runs(api_base_url: str, data_pass_id: int, token: str, *,
     return runs
 
 
-def fetch_detector_flags(flag_api_url: str, data_pass_id: int,
-                         run_number: int, detector_id: int,
-                         token: str) -> Union[List[dict], List[str]]:
-    url = (f"{flag_api_url}?dataPassId={data_pass_id}"
-           f"&runNumber={run_number}&dplDetectorId={detector_id}"
-           f"&token={token}")
+def fetch_detector_flags(
+    flag_api_url: str,
+    data_pass_id: int,
+    run_number: int,
+    detector_id: int,
+    token: str,
+) -> Union[List[Dict[str, Any]], List[str]]:
+    """
+    Query the flag service for one detector in one run.
+
+    Returns
+    -------
+    • ["Not Available"]      – no flag entries **or** every entry lacks
+      effectivePeriods.  
+    • List[dict]             – flag objects that contain at least one
+      effective period (already filtered).  
+    """
+    url = (
+        f"{flag_api_url}?dataPassId={data_pass_id}"
+        f"&runNumber={run_number}&dplDetectorId={detector_id}"
+        f"&token={token}"
+    )
     r = requests.get(url, verify=False, timeout=30)
     r.raise_for_status()
-    flags = r.json().get("data", [])
-    return ["Not Available"] if not flags else [
-        f for f in flags if f.get("effectivePeriods")
-    ]
 
+    # Raw list from the service
+    flags: List[Dict[str, Any]] = r.json().get("data", [])
+
+    # Nothing at all? → Not Available
+    if not flags:
+        return ["Not Available"]
+
+    # Keep only flags that *actually* have period info
+    flags = [f for f in flags if f.get("effectivePeriods")]
+
+    # After filtering, did we lose everything? → Not Available
+    if not flags:
+        return ["Not Available"]
+
+    return flags
 
 def _fill_missing_period(frm: Any, to: Any, run: Dict[str, Any]) -> (Any, Any):
     """Replace None timestamps using the ordered fall-back list."""
