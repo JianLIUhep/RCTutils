@@ -191,12 +191,10 @@ void process_and_upload(const char* csvFilePath,
                 }
             }
             // For detectors that were skipped, mark them as "Bad" unless treatNotAvailableAsGood is true.
-            if (!treatNotAvailableAsGood) {
-                for (const auto& detector : skippedDetectors) {
-                    if (detailedBitMapping[detector].count("Bad")) {
-                        int bit = detailedBitMapping[detector]["Bad"];
-                        encodedWord |= (1 << bit);
-                    }
+            for (const auto& detector : skippedDetectors) {
+                if (detailedBitMapping[detector].count("Bad")) {
+                    int bit = detailedBitMapping[detector]["Bad"];
+                    encodedWord |= (1 << bit);
                 }
             }
             encodedFlags[fromTimestamp] = encodedWord;
