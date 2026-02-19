@@ -50,6 +50,11 @@ python3 rct_post_flag.py rct_post_flag.json --data_pass "LHC24al_cpass0" --detec
 ```
 python3 rct_post_flag.py rct_post_flag.json --data_pass "LHC24al_cpass0" --detector "ITS" -b test.csv --minutes minutes.txt --no_diff
 ```
+- Flag runs with TPC bad time intervals
+```
+python3  rct_post_flag.py rct_post_flag.json --data_pass LHC24ar_cpass1_residuals_tpc --detector TPC --flagTypeId 7 --interval_file TPCBadIntervals_ts_0.5cm_badbzCTF_noIDC.txt  --min_run 560141 --max
+_run 560141
+```
 ## Verifying multi-runs in RCT
 Both the latest run-based and time-dependent flags for each run can be verified with this script. Put your Bookkeeping token to the json configuration file. The `--comment`, `--max_run`, `--min_run` and `--excluded_runs` are optional. If `--max_run` and `--min_run` are omitted, all runs from the pass will be verified. Add your BK token to the configuration json file. **This script is not well tested. Suggest verifying the time-dependent flags by hand.** 
 - Example command:
