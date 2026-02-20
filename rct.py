@@ -2,7 +2,7 @@
 """
 rct.py – Fetch run / detector information and write a CSV summary.
 
-Handles missing timestamps in detector-flag *effectivePeriods* by substituting
+Handles missing timestamps in detector-flag effectivePeriods by substituting
 (firstTfTimestamp, lastTfTimestamp) → (timeTrgStart, timeTrgEnd)
 → (timeO2Start, timeO2End) in that order.
 """
@@ -10,8 +10,9 @@ Handles missing timestamps in detector-flag *effectivePeriods* by substituting
 import argparse
 import csv
 import json
+import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 import requests
 import urllib3
@@ -47,6 +48,7 @@ _FALLBACK_PAIRS = [
     ("timeO2Start", "timeO2End"),
 ]
 
+
 # ───────────────────────────────────────────────────────────────────────────────
 # Helper utilities
 # ───────────────────────────────────────────────────────────────────────────────
@@ -62,8 +64,7 @@ def _ms_to_str(ms: Any) -> str:
             return datetime.utcfromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
         except (OSError, OverflowError, ValueError):
             return str(ms)
-    return str(ms)          # fallback for odd types
-
+    return str(ms)
 
 
 def fetch_data_pass_ids(api_base_url: str, token: str) -> Dict[str, int]:
@@ -73,24 +74,34 @@ def fetch_data_pass_ids(api_base_url: str, token: str) -> Dict[str, int]:
     return {dp["name"]: dp["id"] for dp in r.json().get("data", [])}
 
 
-def fetch_runs(api_base_url: str, data_pass_id: int, token: str, *,
-               extra_fields: Optional[List[str]] = None,
-               convert_time: bool = False) -> List[Dict[str, Any]]:
-    url = (f"{api_base_url}/runs?filter[dataPassIds][]={data_pass_id}"
-           f"&token={token}")
+def fetch_runs(
+    api_base_url: str,
+    data_pass_id: int,
+    token: str,
+    *,
+    extra_fields: Optional[List[str]] = None,
+    convert_time: bool = False
+) -> List[Dict[str, Any]]:
+    url = f"{api_base_url}/runs?filter[dataPassIds][]={data_pass_id}&token={token}"
     r = requests.get(url, verify=False, timeout=60)
     r.raise_for_status()
     runs = r.json().get("data", [])
 
     extra_fields = extra_fields or []
     for run in runs:
-        run["detectors_involved"] = run.get("detectors", "").split(",") \
-            if run.get("detectors") else []
+        # Robust split: strip whitespace so "TPC, ITS" works
+        dets = run.get("detectors")
+        if dets:
+            run["detectors_involved"] = [d.strip() for d in dets.split(",") if d.strip()]
+        else:
+            run["detectors_involved"] = []
+
         for k in extra_fields:
             if k not in run:
                 run[k] = "N/A"
             elif convert_time and k in _MS_TIME_FIELDS:
                 run[k] = _ms_to_str(run[k])
+
     return runs
 
 
@@ -104,12 +115,9 @@ def fetch_detector_flags(
     """
     Query the flag service for one detector in one run.
 
-    Returns
-    -------
-    • ["Not Available"]      – no flag entries **or** every entry lacks
-      effectivePeriods.  
-    • List[dict]             – flag objects that contain at least one
-      effective period (already filtered).  
+    Returns:
+      • ["Not Available"] – no flag entries OR every entry lacks effectivePeriods.
+      • List[dict]        – flags that contain at least one effective period.
     """
     url = (
         f"{flag_api_url}?dataPassId={data_pass_id}"
@@ -119,23 +127,19 @@ def fetch_detector_flags(
     r = requests.get(url, verify=False, timeout=30)
     r.raise_for_status()
 
-    # Raw list from the service
     flags: List[Dict[str, Any]] = r.json().get("data", [])
 
-    # Nothing at all? → Not Available
     if not flags:
         return ["Not Available"]
 
-    # Keep only flags that *actually* have period info
     flags = [f for f in flags if f.get("effectivePeriods")]
-
-    # After filtering, did we lose everything? → Not Available
     if not flags:
         return ["Not Available"]
 
     return flags
 
-def _fill_missing_period(frm: Any, to: Any, run: Dict[str, Any]) -> (Any, Any):
+
+def _fill_missing_period(frm: Any, to: Any, run: Dict[str, Any]) -> Tuple[Any, Any]:
     """Replace None timestamps using the ordered fall-back list."""
     if frm is not None and to is not None:
         return frm, to
@@ -146,26 +150,27 @@ def _fill_missing_period(frm: Any, to: Any, run: Dict[str, Any]) -> (Any, Any):
     return frm or "N/A", to or "N/A"
 
 
-def format_flags(flags: Union[List[dict], List[str]],
-                 run: Dict[str, Any], *,
-                 convert_time: bool = False) -> str:
+def format_flags(
+    flags: Union[List[dict], List[str]],
+    run: Dict[str, Any],
+    *,
+    convert_time: bool = False
+) -> str:
     """
     Render flags for one detector as text.
 
-    * When period['from'] or ['to'] == None  → substitute timestamps from the
-      run itself using the order: firstTf → timeTrg → timeO2.
-    * 'Not Available' / 'Not Present' propagated unchanged.
+    When period['from'] or ['to'] is None → substitute timestamps from the run
+    using the order: firstTf → timeTrg → timeO2.
     """
-    if flags in (["Not Available"], ["Not Present"]):
-        return flags[0]
+    if flags == ["Not Available"]:
+        return "Not Available"
     if isinstance(flags, str):
         flags = json.loads(flags)
 
     out: List[str] = []
     for flag in flags:
         for period in flag["effectivePeriods"]:
-            frm, to = _fill_missing_period(period.get("from"),
-                                           period.get("to"), run)
+            frm, to = _fill_missing_period(period.get("from"), period.get("to"), run)
             if convert_time:
                 frm, to = _ms_to_str(frm), _ms_to_str(to)
             out.append(f"{flag['flagType']['method']} (from: {frm} to: {to})")
@@ -176,8 +181,12 @@ def format_flags(flags: Union[List[dict], List[str]],
 # Main workflow
 # ───────────────────────────────────────────────────────────────────────────────
 
-
-def main(cfg_path: str, convert_time: bool) -> None:
+def main(
+    cfg_path: str,
+    convert_time: bool,
+    sleep_detectors: List[str],
+    sleep_seconds: float,
+) -> None:
     with open(cfg_path) as f:
         cfg = json.load(f)
 
@@ -185,19 +194,27 @@ def main(cfg_path: str, convert_time: bool) -> None:
     flag_api_url = cfg["flag_api_url"]
     token = cfg["token"]
     data_pass_def = cfg["dataPassNames"]
-    detector_ids = cfg["detector_ids"]        # keep JSON order
+    detector_ids: Dict[str, int] = cfg["detector_ids"]  # keep JSON order
+
+    sleep_det_set = set(sleep_detectors or [])
+    if sleep_seconds < 0:
+        sleep_seconds = 0.0
 
     data_pass_ids = fetch_data_pass_ids(api_base_url, token)
 
     for dp_name, dp_info in data_pass_def.items():
         dp_id = data_pass_ids.get(dp_name)
         if dp_id is None:
-            print(f"[warn] No data-pass ID found for “{dp_name}”.")
+            print(f"[warn] No data-pass ID found for \"{dp_name}\".")
             continue
 
-        runs = fetch_runs(api_base_url, dp_id, token,
-                          extra_fields=EXTRA_RUN_FIELDS,
-                          convert_time=convert_time)
+        runs = fetch_runs(
+            api_base_url,
+            dp_id,
+            token,
+            extra_fields=EXTRA_RUN_FIELDS,
+            convert_time=convert_time
+        )
 
         lo, hi = dp_info.get("run_range", [None, None])
         if lo is not None:
@@ -217,18 +234,25 @@ def main(cfg_path: str, convert_time: bool) -> None:
 
         with open(csv_file, "w", newline="") as fh:
             w = csv.writer(fh)
+            # All detectors are written, no selection
             w.writerow(["Run Number"] + EXTRA_RUN_FIELDS + list(detector_ids.keys()))
 
             for run in runs:
                 row = [run["runNumber"]] + [run[k] for k in EXTRA_RUN_FIELDS]
+
                 for det_name, det_id in detector_ids.items():
                     if det_name not in run["detectors_involved"]:
                         row.append("Not present")
-                    else:
-                        flags = fetch_detector_flags(
-                            flag_api_url, dp_id, run["runNumber"], det_id, token
-                        )
-                        row.append(format_flags(flags, run, convert_time=convert_time))
+                        continue
+
+                    flags = fetch_detector_flags(flag_api_url, dp_id, run["runNumber"], det_id, token)
+                    row.append(format_flags(flags, run, convert_time=convert_time))
+
+                    # Sleep only for specific detectors (configurable)
+                    if det_name in sleep_det_set and sleep_seconds > 0:
+                        print(f"INFO: Sleeping {sleep_seconds:g} s (after {det_name}, run {run['runNumber']})...")
+                        time.sleep(sleep_seconds)
+
                 w.writerow(row)
 
         print(f"[ ok ] {len(runs):4d} runs → {csv_file}")
@@ -243,7 +267,18 @@ if __name__ == "__main__":
     ap.add_argument("config_file", help="Path to the JSON configuration file")
     ap.add_argument("--convert-time", action="store_true",
                     help="Render millisecond timestamps as ISO UTC strings")
+
+    # New: sleeping control (does not affect downloading selection)
+    ap.add_argument("--sleep-detectors", nargs="+", default=[],
+                    help="Sleep after querying these detectors, e.g. --sleep-detectors TPC")
+    ap.add_argument("--sleep-seconds", type=float, default=0.0,
+                    help="Sleep duration in seconds (default: 0, meaning disabled)")
+
     args = ap.parse_args()
 
-    main(args.config_file, args.convert_time)
-
+    main(
+        args.config_file,
+        args.convert_time,
+        args.sleep_detectors,
+        args.sleep_seconds,
+    )

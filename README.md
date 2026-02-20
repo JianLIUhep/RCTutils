@@ -26,7 +26,7 @@
 ```
 The range of runs can be set in this configration file by the "run_range" for each period. No filtering on the runs if the "run_range" is null.
 - Example file: config_rct.json.  
-- `python3 rct.py config_rct.json`. Add `--convert-time` if you want to save the timestamps in human-readable format. 
+- `python3 rct.py config_rct.json`. Add `--convert-time` if you want to save the timestamps in human-readable format. Add `--sleep-detectors TPC ITS --sleep-seconds 5` if you need to throttle the download for specific detectors
 - Separate .csv files are saved for each period if you have more than one period in the configuration file
 ## Produce run lists from RCT
 - Produce the .csv files mentioned in **Export runs from RCT (in Bookkeeping)** 
