@@ -20,7 +20,7 @@ std::map<std::string, std::map<std::string, int>> detailedBitMapping = {
     {"FV0", { {"Bad", 5} }},
     {"HMP", { {"Bad", 6}, {"NoDetectorData", 6} }},
     {"ITS", { {"Bad", 7}, {"UnknownQuality", 7}, {"BadTracking", 7}, {"LimitedAcceptanceMCReproducible", 8} }},
-    {"MCH", { {"Bad", 9}, {"NoDetectorData", 9}, {"Unknown", 9}, {"LimitedAcceptanceMCReproducible", 10} }},
+    {"MCH", { {"Bad", 9}, {"BadTracking", 9}, {"NoDetectorData", 9}, {"Unknown", 9}, {"LimitedAcceptanceMCReproducible", 10} }},
     {"MFT", { {"Bad", 11}, {"BadTracking", 11}, {"LimitedAcceptanceMCReproducible", 12} }},
     {"MID", { {"Bad", 13}, {"BadTracking", 13}, {"LimitedAcceptanceMCReproducible", 14} }},
     {"PHS", { {"Bad", 15}, {"Invalid", 15} }},
