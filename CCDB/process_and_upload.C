@@ -18,13 +18,13 @@
 std::string getErrorLogFilename() {
     std::time_t now = std::time(nullptr);
     char buffer[64];
-    std::strftime(buffer, sizeof(buffer), "unexpected_flags_%Y%m%d_%H%M%S.log", std::localtime(&now));
+    std::strftime(buffer, sizeof(buffer), "unexpected_flags_%Y%m%d_%H%M%S.log",
+                  std::localtime(&now));
     return std::string(buffer);
 }
 
-// The function now accepts an extra boolean parameter treatNotAvailableAsGood.
-// "Not present" is always treated as bad, while "Not Available" is treated based on the flag.
-void process_and_upload(const char* csvFilePath,
+// The function accepts an extra boolean parameter treatNotAvailableAsGood.
+void process_and_upload_v2(const char* csvFilePath,
                         const char* passName,
                         const char* periodName,
                         const char* versionNumber,
@@ -37,23 +37,31 @@ void process_and_upload(const char* csvFilePath,
     }
 
     // Detector flag-to-bit mapping (do not change this according to the README).
-    std::map<std::string, std::map<std::string, int>> detailedBitMapping = {
+    const std::map<std::string, std::map<std::string, int>> detailedBitMapping = {
         {"CPV", { {"Bad", 0}, {"Invalid", 0} }},
-        {"EMC", { {"Bad", 1}, {"NoDetectorData", 1}, {"BadEMCalorimetry", 1}, {"LimitedAcceptanceMCReproducible", 2} }},
+        {"EMC", { {"Bad", 1}, {"NoDetectorData", 1}, {"BadEMCalorimetry", 1},
+                  {"LimitedAcceptanceMCReproducible", 2} }},
         {"FDD", { {"Bad", 3}, {"Invalid", 3}, {"NoDetectorData", 3} }},
         {"FT0", { {"Bad", 4}, {"UnknownQuality", 4}, {"Unknown", 4} }},
         {"FV0", { {"Bad", 5} }},
         {"HMP", { {"Bad", 6}, {"NoDetectorData", 6} }},
-        {"ITS", { {"Bad", 7}, {"UnknownQuality", 7}, {"BadTracking", 7}, {"LimitedAcceptanceMCReproducible", 8} }},
-        {"MCH", { {"Bad", 9}, {"NoDetectorData", 9}, {"Unknown", 9}, {"LimitedAcceptanceMCReproducible", 10} }},
-        {"MFT", { {"Bad", 11}, {"BadTracking", 11}, {"LimitedAcceptanceMCReproducible", 12} }},
-        {"MID", { {"Bad", 13}, {"BadTracking", 13}, {"LimitedAcceptanceMCReproducible", 14} }},
+        {"ITS", { {"Bad", 7}, {"UnknownQuality", 7}, {"BadTracking", 7},
+                  {"LimitedAcceptanceMCReproducible", 8} }},
+        {"MCH", { {"Bad", 9}, {"BadTracking", 9}, {"NoDetectorData", 9}, {"Unknown", 9},
+                  {"LimitedAcceptanceMCReproducible", 10} }},
+        {"MFT", { {"Bad", 11}, {"BadTracking", 11},
+                  {"LimitedAcceptanceMCReproducible", 12} }},
+        {"MID", { {"Bad", 13}, {"BadTracking", 13},
+                  {"LimitedAcceptanceMCReproducible", 14} }},
         {"PHS", { {"Bad", 15}, {"Invalid", 15} }},
-        {"TOF", { {"Bad", 16}, {"NoDetectorData", 16}, {"BadPID", 16}, {"LimitedAcceptanceMCReproducible", 17} }},
+        {"TOF", { {"Bad", 16}, {"NoDetectorData", 16}, {"BadPID", 16},
+                  {"LimitedAcceptanceMCReproducible", 17} }},
         {"TPC", { {"Bad", 18}, {"BadTracking", 18}, {"BadPID", 19},
-                  {"LimitedAcceptanceMCNotReproducible", 18}, {"LimitedAcceptanceMCReproducible", 20} }},
+                  {"LimitedAcceptanceMCNotReproducible", 18},
+                  {"LimitedAcceptanceMCReproducible", 20} }},
         {"TRD", { {"Bad", 21}, {"BadTracking", 21} }},
-        {"ZDC", { {"Bad", 22}, {"UnknownQuality", 22}, {"Unknown", 22}, {"NoDetectorData", 22} }}
+        {"ZDC", { {"Bad", 22}, {"UnknownQuality", 22}, {"Unknown", 22},
+                  {"NoDetectorData", 22} }}
     };
 
     // Open CSV file.
@@ -72,6 +80,7 @@ void process_and_upload(const char* csvFilePath,
     }
     std::istringstream headerStream(line);
     std::string column;
+    std::cout << "pass" << std::endl;
     while (std::getline(headerStream, column, ',')) {
         column.erase(column.find_last_not_of(" \t\r\n") + 1);
         column.erase(std::remove(column.begin(), column.end(), '\r'), column.end());
@@ -92,7 +101,12 @@ void process_and_upload(const char* csvFilePath,
     // Initialize the CCDB API.
     o2::ccdb::CcdbApi ccdb;
     ccdb.init("http://alice-ccdb.cern.ch");
+    std::cout << "pass2" << std::endl;
 
+    // Container to accumulate all runs for the JSON output.
+    std::map<std::string, std::map<uint64_t, uint32_t>> jsonRuns;
+    uint64_t runStart;
+    uint64_t runEnd;
     // Process each row in the CSV.
     while (std::getline(file, line)) {
         std::istringstream lineStream(line);
@@ -109,11 +123,13 @@ void process_and_upload(const char* csvFilePath,
         }
 
         std::string runNumber = rowValues[0];
+
         // Get run start (sor) and end (eor) times.
         auto runDuration = o2::ccdb::BasicCCDBManager::getRunDuration(ccdb, std::stoi(runNumber));
         uint64_t sor = runDuration.first;
         uint64_t eor = runDuration.second;
-
+        runStart = sor;
+	runEnd = eor;
         // Containers for time ranges and flag names.
         std::map<std::string, std::vector<std::pair<int64_t, int64_t>>> timeRanges;
         std::map<std::string, std::vector<std::pair<std::string, std::pair<int64_t, int64_t>>>> flagNames;
@@ -126,31 +142,28 @@ void process_and_upload(const char* csvFilePath,
 
             // Handle "Not present" and "Not Available" flags.
             if (flags == "Not present") {
-                // Always treat "Not present" as bad.
-                skippedDetectors.insert(detector);
+                skippedDetectors.insert(detector); // Always bad.
                 continue;
             } else if (flags == "Not Available") {
-                // For "Not Available", check the option.
                 if (!treatNotAvailableAsGood) {
-                    skippedDetectors.insert(detector);
+                    skippedDetectors.insert(detector); // Bad when option is false.
                 }
                 continue;
             }
 
             // Use regex to extract flag name and time range.
             std::regex flagRegex(R"((\w+)\s+\(from:\s+(\d+)\s+to:\s+(\d+)\))");
-            std::smatch match;
             auto flagStart = std::sregex_iterator(flags.begin(), flags.end(), flagRegex);
             auto flagEnd = std::sregex_iterator();
 
             for (auto it = flagStart; it != flagEnd; ++it) {
-                match = *it;
+                std::smatch match = *it;
                 std::string flagName = match[1];
                 int64_t from = std::stoll(match[2]);
                 int64_t to = std::stoll(match[3]);
 
                 // Log and treat unexpected flags as "Bad".
-                if (!detailedBitMapping[detector].count(flagName) && flagName != "Good") {
+                if (!detailedBitMapping.at(detector).count(flagName) && flagName != "Good") {
                     errorLog << "Run: " << runNumber
                              << ", Detector: " << detector
                              << ", Unexpected Flag: " << flagName
@@ -163,6 +176,7 @@ void process_and_upload(const char* csvFilePath,
                 flagNames[detector].emplace_back(flagName, std::make_pair(from, to));
             }
         }
+	std::cout << "pass3" << std::endl;
 
         // Build the encoded flags map (one entry per distinct timestamp).
         std::map<uint64_t, uint32_t> encodedFlags;
@@ -173,34 +187,45 @@ void process_and_upload(const char* csvFilePath,
                 timePoints.insert(range.second);
             }
         }
+
+       // If no detector gave any interval, timePoints will be empty
+       if (timePoints.empty()) {
+          // Define a single global segment for the run
+          timePoints.insert(runStart);
+          timePoints.insert(runEnd);
+       } 
+
         std::vector<uint64_t> sortedTimePoints(timePoints.begin(), timePoints.end());
         std::sort(sortedTimePoints.begin(), sortedTimePoints.end());
+
         for (size_t i = 0; i < sortedTimePoints.size() - 1; ++i) {
             uint64_t fromTimestamp = sortedTimePoints[i];
             uint64_t toTimestamp = sortedTimePoints[i + 1];
             uint32_t encodedWord = 0;
+
             // Set bits for each detector if the flag is valid in this time range.
             for (const auto& [detector, ranges] : flagNames) {
                 for (const auto& [flagName, range] : ranges) {
                     if (range.first <= fromTimestamp && range.second >= toTimestamp) {
-                        if (detailedBitMapping[detector].count(flagName)) {
-                            int bit = detailedBitMapping[detector][flagName];
-                            encodedWord |= (1 << bit);
+                        if (detailedBitMapping.at(detector).count(flagName)) {
+                            int bit = detailedBitMapping.at(detector).at(flagName);
+                            encodedWord |= (1u << bit);
                         }
                     }
                 }
             }
-            // For detectors that were skipped, mark them as "Bad" unless treatNotAvailableAsGood is true.
+
+            // Always mark skipped detectors as "Bad".
             for (const auto& detector : skippedDetectors) {
-                if (detailedBitMapping[detector].count("Bad")) {
-                    int bit = detailedBitMapping[detector]["Bad"];
-                    encodedWord |= (1 << bit);
+                if (detailedBitMapping.at(detector).count("Bad")) {
+                    int bit = detailedBitMapping.at(detector).at("Bad");
+                    encodedWord |= (1u << bit);
                 }
             }
             encodedFlags[fromTimestamp] = encodedWord;
         }
 
-        // --- Squash consecutive entries with identical bitmasks ---
+        // Squash consecutive entries with identical bitmasks.
         std::map<uint64_t, uint32_t> squashedEncodedFlags;
         if (!encodedFlags.empty()) {
             auto it = encodedFlags.begin();
@@ -216,17 +241,12 @@ void process_and_upload(const char* csvFilePath,
             }
         }
 
-        std::cout << "Encoded Map for Run " << runNumber << ":\n";
-        std::vector<uint64_t> squashedTimes;
-        for (const auto& kv : squashedEncodedFlags)
-            squashedTimes.push_back(kv.first);
-        std::sort(squashedTimes.begin(), squashedTimes.end());
-        for (size_t i = 0; i < squashedTimes.size(); i++) {
-            uint64_t start = squashedTimes[i];
-            uint32_t mask = squashedEncodedFlags[start];
-            std::cout << "  Timestamp: " << start << ", Bitmask: "
-                      << std::bitset<32>(mask) << " (" << mask << ")\n";
-        }
+        // Console summary.
+        std::cout << "Run " << runNumber << " processed (" << squashedEncodedFlags.size()
+                  << " segments).\n";
+
+        // Add to JSON accumulator.
+        jsonRuns[runNumber] = squashedEncodedFlags;
 
         // Prepare metadata.
         std::map<std::string, std::string> metadata;
@@ -236,9 +256,51 @@ void process_and_upload(const char* csvFilePath,
         metadata["version"] = versionNumber;
 
         // Upload the squashed encoded flags to CCDB.
-        ccdb.storeAsTFileAny(&squashedEncodedFlags, ccdbPath, metadata, sor - 10000, eor + 10000);
-        std::cout << "Successfully uploaded encoded flags for run " << runNumber << " to CCDB.\n";
+        ccdb.storeAsTFileAny(&squashedEncodedFlags, ccdbPath, metadata,
+                             sor - 10000, eor + 10000);
+        std::cout << "  ↳ uploaded to CCDB\n";
     }
     errorLog.close();
+
+    // -------------------------------------------------------------------------
+    // Write ONE JSON file for the whole CSV.
+    // -------------------------------------------------------------------------
+    std::string csvName(csvFilePath);
+    std::size_t pos = csvName.find_last_of("/\\");
+    if (pos != std::string::npos) csvName = csvName.substr(pos + 1);
+    pos = csvName.find_last_of('.');
+    if (pos != std::string::npos) csvName = csvName.substr(0, pos);
+    std::string jsonFileName = csvName + ".json";
+
+    std::ofstream jsonOut(jsonFileName, std::ios::out | std::ios::trunc);
+    if (!jsonOut.is_open()) {
+        std::cerr << "Error: Could not write " << jsonFileName << std::endl;
+        return;
+    }
+
+    jsonOut << "{\n";
+    size_t runIdx = 0;
+    for (const auto& [run, map] : jsonRuns) {
+        jsonOut << "  \"" << run << "\": {\n";
+        size_t segIdx = 0;
+        for (const auto& [ts, mask] : map) {
+            jsonOut << "    \"" << ts << "\": { "
+                    << "\"dec\": " << mask << ", "
+                    << "\"bin\": \"" << std::bitset<32>(mask).to_string() << "\" }"
+                    << (segIdx + 1 < map.size() ? "," : "") << "\n";
+            ++segIdx;
+        }
+        jsonOut << "  }" << (runIdx + 1 < jsonRuns.size() ? "," : "") << "\n";
+        ++runIdx;
+    }
+    jsonOut << "  ,\"_meta\": { "
+            << "\"csv\": \"" << csvName << "\", "
+            << "\"pass\": \"" << passName << "\", "
+            << "\"period\": \"" << periodName << "\", "
+            << "\"version\": \"" << versionNumber << "\" }\n"
+            << "}\n";
+    jsonOut.close();
+
+    std::cout << "Saved summary JSON: " << jsonFileName << std::endl;
 }
 
