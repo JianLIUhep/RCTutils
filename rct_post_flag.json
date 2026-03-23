@@ -5,7 +5,8 @@
     "detector_ids": {
         "CPV": 5, "EMC": 6, "FDD": 15, "FT0": 14, "FV0": 13,
         "HMP": 1, "ITS": 7, "MCH": 2, "MFT": 8, "MID": 3,
-        "PHS": 12, "TOF": 9, "TPC": 4, "TRD": 10, "ZDC": 11
+        "PHS": 12, "TOF": 9, "TPC": 4, "TRD": 10, "ZDC": 11,
+	"GMU": 201, "MUD": 200
     }
 }
 
