@@ -49,11 +49,19 @@ def read_csv_file(csv_file):
     df = pd.read_csv(csv_file)
     return df.to_dict(orient='records')
 
-
 def read_interval_file(interval_file):
     """
-    Expected format (space separated):
-      <run> <tmin> <tmax> [# comment]
+    Read interval file in either of these formats:
+
+    1) Space-separated (original):
+       <run> <tmin> <tmax> [# comment]
+
+    2) Comma-separated (CSV-like):
+       <run>,<tmin>,<tmax>[,<extra1>,<extra2>,...]
+       If no '# comment' is present, extra fields are joined as the comment.
+
+    Returns a list of dicts:
+      { "run": int, "tmin": int, "tmax": int, "comment": str or None }
     """
     intervals = []
     with open(interval_file, "r") as f:
@@ -62,6 +70,7 @@ def read_interval_file(interval_file):
             if not line or line.startswith("#"):
                 continue
 
+            # Split off trailing comment after '#'
             comment = None
             if "#" in line:
                 main, comment_part = line.split("#", 1)
@@ -73,18 +82,44 @@ def read_interval_file(interval_file):
             if not main:
                 continue
 
-            parts = main.split()
-            if len(parts) < 3:
-                continue
+            # New: comma-separated support
+            if "," in main:
+                parts = [p.strip() for p in main.split(",")]
+                if len(parts) < 3:
+                    continue
+                try:
+                    run = int(parts[0])
+                    tmin = int(parts[1])
+                    tmax = int(parts[2])
+                except ValueError:
+                    continue
 
-            try:
-                run = int(parts[0])
-                tmin = int(parts[1])
-                tmax = int(parts[2])
-            except ValueError:
-                continue
+                # If no '#' comment, build comment from remaining CSV fields
+                if comment is None and len(parts) > 3:
+                    extra = [p for p in parts[3:] if p]
+                    if extra:
+                        comment = " ".join(extra)
 
-            intervals.append({"run": run, "tmin": tmin, "tmax": tmax, "comment": comment})
+            # Original: whitespace-separated format
+            else:
+                parts = main.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    run = int(parts[0])
+                    tmin = int(parts[1])
+                    tmax = int(parts[2])
+                except ValueError:
+                    continue
+                # IMPORTANT: keep original behaviour: do NOT infer comment
+                # from extra whitespace tokens; only use '# ...' comments.
+
+            intervals.append({
+                "run": run,
+                "tmin": tmin,
+                "tmax": tmax,
+                "comment": comment
+            })
 
     return intervals
 
